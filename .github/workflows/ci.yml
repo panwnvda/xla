@@ -12,20 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
+#
+# BUG BOUNTY DEMO — OSS VRP
+# This workflow mirrors the vulnerable pattern in the real openxla/xla ci.yml:
+#   - Triggers on pull_request with no fork gate or approval gate
+#   - Checks out the PR head (refs/pull/N/merge), which includes the fork's code
+#   - Executes build_tools/ci/build.py directly from the checked-out fork tree
+#
+# In production this runs on Google self-hosted GCE runners (linux-x86-n2-16,
+# linux-x86-g2-16-l4-1gpu, linux-arm64-c4a-16, windows-x86-n2-16).
+# This demo uses ubuntu-latest because the fork does not have those runners
+# registered. The code-execution path is identical.
+# ============================================================================
 name: CI
 permissions:
   contents: read
 on:
-  workflow_dispatch:
-    inputs:
-      halt-for-connection:
-        description: 'Should this workflow run wait for a remote connection?'
-        type: choice
-        required: true
-        default: 'no'
-        options:
-          - 'yes'
-          - 'no'
   pull_request:
   push:
     branches:
@@ -33,187 +35,45 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   Tests:
     strategy:
-      # Don't fail fast - want to see results for all builds even if one fails.
       fail-fast: false
       matrix:
         job_info: [
           {
-            pool: "linux-x86-n2-16",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "XLA Linux x86 CPU",
+            # In production: pool = "linux-x86-n2-16" (Google GCE self-hosted)
+            # Demo: ubuntu-latest (GitHub-hosted) — same execution path
+            pool: "ubuntu-latest",
+            name: "XLA Linux x86 CPU [BUG BOUNTY DEMO]",
             repo: "openxla/xla",
-          },
-          {
-            pool: "windows-x86-n2-16",
-            container: null,
-            name: "XLA Windows x86 CPU",
-            repo: "openxla/xla",
-          },
-          {
-            pool: "linux-x86-n2-16",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "XLA Linux x86 CPU Bzlmod",
-            repo: "openxla/xla",
-          },
-          {
-            pool: "linux-x86-n2-16",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "XLA Linux X86 GPU ONEAPI",
-            repo: "openxla/xla",
-          },
-          {
-            pool: "linux-x86-n2-16",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "XLA Linux x86 GPU ROCm",
-            repo: "openxla/xla",
-          },
-          {
-            pool: "linux-x86-g2-16-l4-1gpu",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "XLA Linux x86 GPU L4",
-            repo: "openxla/xla",
-          },
-          {
-            pool: "linux-arm64-c4a-16",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build-arm64:latest",
-            name: "XLA Linux ARM64 CPU",
-            repo: "openxla/xla",
-          },
-          {
-            pool: "linux-x86-n2-16",
-            container: "gcr.io/tensorflow-sigs/build:latest-python3.11",
-            name: "JAX Linux x86 CPU Bzlmod",
-            repo: "jax-ml/jax",
-          },
-          {
-            pool: "windows-x86-n2-16",
-            container: null,
-            name: "JAX Windows x86 CPU",
-            repo: "jax-ml/jax",
-          },
-          {
-            pool: "linux-x86-g2-16-l4-1gpu",
-            container: "gcr.io/tensorflow-sigs/build:latest-python3.11",
-            name: "JAX Linux x86 GPU L4",
-            repo: "jax-ml/jax",
-          },
-          {
-            pool: "linux-x86-n2-16",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "TensorFlow Linux x86 CPU",
-            repo: "tensorflow/tensorflow",
-          },
-          {
-            pool: "linux-x86-g2-16-l4-1gpu",
-            container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest",
-            name: "TensorFlow Linux x86 GPU L4",
-            repo: "tensorflow/tensorflow",
           },
         ]
     name: ${{ matrix.job_info.name }}
     runs-on: ${{ matrix.job_info.pool }}
-    container: ${{ matrix.job_info.container }} # zizmor: ignore[unpinned-images]
+    # NOTE: In production, container: pulls from Google's private Artifact Registry
+    # (us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest)
+    # using the GCE SA credentials — omitted here since the fork cannot pull it.
     defaults:
       run:
         shell: bash
     steps:
       - name: "Checking out openxla/xla"
+        # This checkout resolves to refs/pull/N/merge on a pull_request event,
+        # which includes the HEAD of the fork PR — i.e. attacker-controlled code.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: "openxla/xla"
           persist-credentials: false
-      - name: Checking out ${{ matrix.job_info.repo }}
-        if: ${{ matrix.job_info.repo != 'openxla/xla' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ matrix.job_info.repo }}
-          path: ${{ matrix.job_info.repo }}
-          persist-credentials: false
-      - name: "Wait For Connection"
-        uses: google-ml-infra/actions/ci_connection@7f5ca0c263a81ed09ea276524c1b9192f1304e3c
-        with:
-          halt-dispatch-input: ${{ inputs.halt-for-connection }}
+
       - name: "Run build.py"
+        # Executes $GITHUB_WORKSPACE/openxla/xla/build_tools/ci/build.py
+        # That path resolves to the fork's build.py — NOT the upstream's.
+        # Any attacker who opens a PR from a fork controls this script entirely.
         working-directory: ${{ matrix.job_info.repo }}
         timeout-minutes: 60
         run: |
-          # Shellcheck doesn't understand GitHub Actions expressions and incorrectly
-          # thinks this comparison will always fail.
-          # shellcheck disable=SC2193
-          if [[ "${{ matrix.job_info.pool }}" == *"windows"* ]]; then
-            python "$GITHUB_WORKSPACE"\\openxla\\xla\\build_tools\\ci\\build.py --build="${{ matrix.job_info.name }}_github_actions"
-          else
-            "$GITHUB_WORKSPACE"/openxla/xla/build_tools/ci/build.py --build="${{ matrix.job_info.name }}_github_actions"
-          fi
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+          "$GITHUB_WORKSPACE"/openxla/xla/build_tools/ci/build.py \
+            --build="${{ matrix.job_info.name }}_github_actions"
