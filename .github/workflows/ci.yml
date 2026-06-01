@@ -1,33 +1,16 @@
 # Copyright 2025 The OpenXLA Authors. All Rights Reserved.
+# Apache-2.0 License. See LICENSE for details.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ============================================================================
-#
-# BUG BOUNTY DEMO — OSS VRP
-# This workflow mirrors the vulnerable pattern in the real openxla/xla ci.yml:
-#   - Triggers on pull_request with no fork gate or approval gate
-#   - Checks out the PR head (refs/pull/N/merge), which includes the fork's code
-#   - Executes build_tools/ci/build.py directly from the checked-out fork tree
-#
-# In production this runs on Google self-hosted GCE runners (linux-x86-n2-16,
-# linux-x86-g2-16-l4-1gpu, linux-arm64-c4a-16, windows-x86-n2-16).
-# This demo uses ubuntu-latest because the fork does not have those runners
-# registered. The code-execution path is identical.
-# ============================================================================
+# BUG BOUNTY DEMO - OSS VRP
+# Mirrors the vulnerable pattern in the real openxla/xla ci.yml:
+#   - Triggers on pull_request with no fork gate
+#   - Checks out PR head (fork-controlled code)
+#   - Executes build_tools/ci/build.py from the fork tree
 name: CI
 permissions:
   contents: read
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -39,41 +22,25 @@ concurrency:
 
 jobs:
   Tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        job_info: [
-          {
-            # In production: pool = "linux-x86-n2-16" (Google GCE self-hosted)
-            # Demo: ubuntu-latest (GitHub-hosted) — same execution path
-            pool: "ubuntu-latest",
-            name: "XLA Linux x86 CPU [BUG BOUNTY DEMO]",
-            repo: "openxla/xla",
-          },
-        ]
-    name: ${{ matrix.job_info.name }}
-    runs-on: ${{ matrix.job_info.pool }}
-    # NOTE: In production, container: pulls from Google's private Artifact Registry
-    # (us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest)
-    # using the GCE SA credentials — omitted here since the fork cannot pull it.
+    name: "XLA Linux x86 CPU [BUG BOUNTY DEMO]"
+    # In production this is: linux-x86-n2-16 (Google GCE self-hosted runner)
+    # Using ubuntu-latest here since the fork lacks those runner labels
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
     steps:
       - name: "Checking out openxla/xla"
-        # This checkout resolves to refs/pull/N/merge on a pull_request event,
-        # which includes the HEAD of the fork PR — i.e. attacker-controlled code.
+        # On a pull_request event this resolves to refs/pull/N/merge,
+        # which is the attacker fork's HEAD merged into base - attacker controls build.py
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: "openxla/xla"
           persist-credentials: false
 
       - name: "Run build.py"
-        # Executes $GITHUB_WORKSPACE/openxla/xla/build_tools/ci/build.py
-        # That path resolves to the fork's build.py — NOT the upstream's.
-        # Any attacker who opens a PR from a fork controls this script entirely.
-        working-directory: ${{ matrix.job_info.repo }}
-        timeout-minutes: 60
+        # Executes the fork's build_tools/ci/build.py - NOT the upstream copy.
+        # Any fork PR author fully controls this script.
         run: |
           "$GITHUB_WORKSPACE"/openxla/xla/build_tools/ci/build.py \
-            --build="${{ matrix.job_info.name }}_github_actions"
+            --build="XLA Linux x86 CPU [BUG BOUNTY DEMO]_github_actions"
